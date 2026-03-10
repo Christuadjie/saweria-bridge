@@ -34,36 +34,24 @@ let donations = [];
 let lastId = 0;
 
 /**
- * Saweria kirim amount dalam SATUAN SEN (x100).
- * Contoh: Rp 10.000 → dikirim sebagai 1000000
- * Jadi dibagi 100 untuk dapat nominal asli.
- *
- * Saweria payload struktur (per dokumentasi resmi):
+ * Saweria payload struktur aktual:
  * {
- *   "id": "...",
+ *   "amount_raw": 50354,       ← nominal + fee (JANGAN PAKAI INI)
+ *   "amount_to_display": 50000 ← nominal asli yang harus ditampilkan ✅
+ *   "cut": -2854,              ← potongan fee
  *   "donator_name": "...",
- *   "donator_email": "...",
- *   "amount": 1000000,       ← dalam sen, Rp 10.000
- *   "currency": "IDR",
  *   "message": "...",
- *   "media": {...},
- *   ...
  * }
  */
-function parseAmount(raw) {
-  const num = Number(raw) || 0;
-  // Saweria kirim dalam sen → bagi 100
-  return Math.round(num / 100);
-}
-
 function addDonation(data) {
   lastId++;
 
-  // Support berbagai kemungkinan struktur payload Saweria
+  // Pakai amount_to_display → nominal bersih yang dikirim donatur
+  // Fallback ke amount_raw kalau amount_to_display tidak ada
   const rawAmount =
+    data.amount_to_display ??
     data.amount ??
     data.amount_raw ??
-    data.gross_amount ??
     0;
 
   const donation = {
@@ -75,7 +63,7 @@ function addDonation(data) {
       data.donor_name ||
       data.name ||
       "Anonim",
-    amount: parseAmount(rawAmount),
+    amount: Number(rawAmount) || 0,
     currency: data.currency || "IDR",
     message: data.message || "",
     timestamp: Date.now(),
