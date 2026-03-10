@@ -5,19 +5,14 @@ import crypto from "crypto";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// PENTING: pakai raw body dulu sebelum parser lain
+// FIX: Pisahkan middleware biar JSON tidak dibaca sebagai string
 app.use((req, res, next) => {
-  let raw = "";
-  req.on("data", (chunk) => (raw += chunk));
-  req.on("end", () => {
-    req.rawBody = raw;
-    try {
-      req.parsedBody = JSON.parse(raw);
-    } catch {
-      req.parsedBody = null;
-    }
-    next();
-  });
+  const ct = req.headers["content-type"] || "";
+  if (ct.includes("application/json")) {
+    express.json()(req, res, next);
+  } else {
+    express.text({ type: "*/*" })(req, res, next);
+  }
 });
 
 // CORS supaya Roblox bisa akses
@@ -33,47 +28,21 @@ app.use((req, res, next) => {
 let donations = [];
 let lastId = 0;
 
-/**
- * Saweria payload struktur aktual:
- * {
- *   "amount_raw": 50354,       ← nominal + fee (JANGAN PAKAI INI)
- *   "amount_to_display": 50000 ← nominal asli yang harus ditampilkan ✅
- *   "cut": -2854,              ← potongan fee
- *   "donator_name": "...",
- *   "message": "...",
- * }
- */
 function addDonation(data) {
   lastId++;
-
-  // amount_to_display ada di dalam data.etc (bukan di root!)
-  // Fallback ke amount_raw jika etc tidak ada
-  const rawAmount =
-    (data.etc && data.etc.amount_to_display != null ? data.etc.amount_to_display : null) ??
-    data.amount_to_display ??
-    data.amount_raw ??
-    0;
 
   const donation = {
     id: String(lastId),
     source: "saweria",
-    donorName:
-      data.donator_name ||
-      data.donorName ||
-      data.donor_name ||
-      data.name ||
-      "Anonim",
-    amount: Number(rawAmount) || 0,
+    donorName: data.donator_name || data.donorName || data.name || "Anonim",
+    amount: Number(data.amount) || 0, // langsung pakai nilai asli dari Saweria
     currency: data.currency || "IDR",
     message: data.message || "",
     timestamp: Date.now(),
   };
-
   donations.push(donation);
   if (donations.length > 500) donations.splice(0, donations.length - 500);
-  console.log(
-    `[DONATION] ${donation.donorName} - Rp ${donation.amount.toLocaleString("id-ID")} | ID: ${donation.id}`
-  );
+  console.log(`[DONATION] ${donation.donorName} - Rp ${donation.amount} | ID: ${donation.id}`);
   return donation;
 }
 
@@ -85,36 +54,30 @@ app.get("/", (req, res) => {
 // Saweria kirim donasi ke sini
 app.post("/api/webhook", (req, res) => {
   try {
-    const rawBody = req.rawBody || "";
-    // Saweria pakai header "saweria-callback-signature" (bukan x-saweria-signature)
-    const signature =
-      req.headers["saweria-callback-signature"] ||
-      req.headers["x-saweria-signature"] || "";
+    const rawBody = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+    const signature = req.headers["x-saweria-signature"] || "";
     const secret = process.env.SAWERIA_WEBHOOK_SECRET || "";
 
-    // LOG RAW PAYLOAD — untuk debug struktur Saweria
-    console.log("=== [WEBHOOK RAW] ===");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", rawBody);
-    console.log("====================");
-
-    // Verifikasi signature jika secret di-set
     if (secret) {
-      const expected = crypto
-        .createHmac("sha256", secret)
-        .update(rawBody)
-        .digest("hex");
+      const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
       if (expected !== signature) {
-        console.warn("[WEBHOOK] Signature mismatch! Expected:", expected, "Got:", signature);
         return res.status(401).json({ ok: false, reason: "Invalid signature" });
       }
     }
 
-    const data = req.parsedBody;
-    if (!data) {
-      return res.status(400).json({ ok: false, reason: "Invalid JSON payload" });
+    // Parse body dengan aman
+    let data;
+    if (typeof req.body === "object" && req.body !== null) {
+      data = req.body;
+    } else {
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        return res.status(400).json({ ok: false, reason: "Invalid JSON payload" });
+      }
     }
 
+    console.log("[WEBHOOK] Data diterima:", JSON.stringify(data));
     const donation = addDonation(data);
     return res.status(200).json({ ok: true, id: donation.id });
   } catch (e) {
