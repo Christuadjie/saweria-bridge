@@ -46,11 +46,11 @@ let lastId = 0;
 function addDonation(data) {
   lastId++;
 
-  // Pakai amount_to_display → nominal bersih yang dikirim donatur
-  // Fallback ke amount_raw kalau amount_to_display tidak ada
+  // amount_to_display ada di dalam data.etc (bukan di root!)
+  // Fallback ke amount_raw jika etc tidak ada
   const rawAmount =
+    (data.etc && data.etc.amount_to_display != null ? data.etc.amount_to_display : null) ??
     data.amount_to_display ??
-    data.amount ??
     data.amount_raw ??
     0;
 
@@ -86,7 +86,10 @@ app.get("/", (req, res) => {
 app.post("/api/webhook", (req, res) => {
   try {
     const rawBody = req.rawBody || "";
-    const signature = req.headers["x-saweria-signature"] || "";
+    // Saweria pakai header "saweria-callback-signature" (bukan x-saweria-signature)
+    const signature =
+      req.headers["saweria-callback-signature"] ||
+      req.headers["x-saweria-signature"] || "";
     const secret = process.env.SAWERIA_WEBHOOK_SECRET || "";
 
     // LOG RAW PAYLOAD — untuk debug struktur Saweria
