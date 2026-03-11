@@ -31,17 +31,25 @@ let lastId = 0;
 function addDonation(data) {
   lastId++;
 
+  // Pakai amount_to_display (nominal asli yang donor bayar, tanpa potongan fee)
+  // Fallback ke amount_raw / 100 kalau etc tidak ada
+  const amount =
+    Number(data.etc?.amount_to_display) ||
+    Math.round((Number(data.amount_raw) || 0) / 100);
+
   const donation = {
     id: String(lastId),
     source: "saweria",
     donorName: data.donator_name || data.donorName || data.name || "Anonim",
-    amount: Number(data.amount) || 0, // langsung pakai nilai asli dari Saweria
+    amount: amount,
     currency: data.currency || "IDR",
     message: data.message || "",
     timestamp: Date.now(),
   };
+
   donations.push(donation);
   if (donations.length > 500) donations.splice(0, donations.length - 500);
+
   console.log(`[DONATION] ${donation.donorName} - Rp ${donation.amount} | ID: ${donation.id}`);
   return donation;
 }
@@ -78,6 +86,8 @@ app.post("/api/webhook", (req, res) => {
     }
 
     console.log("[WEBHOOK] Data diterima:", JSON.stringify(data));
+    console.log("[RAW AMOUNT]", data.amount_raw, "| amount_to_display:", data.etc?.amount_to_display);
+
     const donation = addDonation(data);
     return res.status(200).json({ ok: true, id: donation.id });
   } catch (e) {
